@@ -9,6 +9,8 @@ To increase network throughput, a `--worker` flag allows to set the concurrency 
 
 endpoints returning a javascript content type will be beautified by default.
 
+![](./static/screenshot.png)
+
 ## installation
 
 Install via go or [binary release](https://github.com/rverton/wonitor/releases):
@@ -18,7 +20,7 @@ Install via go or [binary release](https://github.com/rverton/wonitor/releases):
 ## usage
 
 ```
-$ ./wonitor
+λ $ ./wonitor
 NAME:
    wonitor - web monitor
 
@@ -35,24 +37,30 @@ COMMANDS:
 
 GLOBAL OPTIONS:
    --help, -h  show help (default: false)
-λ wonitor (master) $ ./wonitor add --url https://unlink.io
-λ wonitor (master) $ ./wonitor monitor --save
-[https://unlink.io] 1576b diff:
-HTTP/1.1 200 OK
-Content-Type: text/html
-Server: nginx/1.10.3 (Ubuntu)
-X-Frame-Options: DENY
 
-<html>
-<body>
-<pre>
+λ $ ./wonitor add --url https://unlink.io/
++ https://unlink.io/
+λ $ ./wonitor monitor --save
+[https://unlink.io/] 1576b diff:
+--- Original
++++ Current
+@@ -1 +1,47 @@
++HTTP/1.1 200 OK
++Content-Type: text/html
++Server: nginx/1.10.3 (Ubuntu)
++X-Frame-Options: DENY
+
++<html>
++<body>
++<pre>
 [... snip ...]
-</pre>
-</body>
-</html>
++</pre>
++</body>
++</html>
++
 
-$ ./wonitor monitor --save
-$ # no output because no change detected
+λ $ ./wonitor monitor --save
+λ $ # no output because no change detected
 ```
 
 ## endpoint diffing
