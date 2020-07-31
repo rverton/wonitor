@@ -14,9 +14,9 @@ import (
 	"time"
 
 	badger "github.com/dgraph-io/badger"
+	"github.com/pmezard/go-difflib/difflib"
 
 	"github.com/gosimple/slug"
-	"github.com/sergi/go-diff/diffmatchpatch"
 	"github.com/urfave/cli/v2"
 )
 
@@ -139,15 +139,21 @@ func Abs(x int) int {
 
 func handleDiff(url, bodyOld, bodyNew, outDir string) {
 	diffLen := Abs(len(bodyOld) - len(bodyNew))
-	dmp := diffmatchpatch.New()
-	diffs := dmp.DiffMain(bodyOld, bodyNew, false)
+	diff := difflib.UnifiedDiff{
+		A:        difflib.SplitLines(bodyOld),
+		B:        difflib.SplitLines(bodyNew),
+		FromFile: "Original",
+		ToFile:   "Current",
+		Context:  3,
+	}
+	text, _ := difflib.GetUnifiedDiffString(diff)
 
 	if outDir == "" {
 		fmt.Printf("[%v] %vb diff:\n", url, diffLen)
-		fmt.Println(dmp.DiffPrettyText(diffs))
+		fmt.Println(text)
 	} else {
-		filename := fmt.Sprintf("%v/%v_%v.html", outDir, time.Now().Format("20060201-150405"), slug.Make(url))
-		data := []byte(dmp.DiffPrettyHtml(diffs))
+		filename := fmt.Sprintf("%v/%v_%v.diff", outDir, time.Now().Format("20060201-150405"), slug.Make(url))
+		data := []byte(text)
 
 		err := ioutil.WriteFile(filename, data, 0644)
 		if err != nil {

@@ -5,7 +5,7 @@ list of http headers and the full response body is stored on a local key/value s
 
 wonitor makes use of a fast file based key/value store called [BadgerDb](https://github.com/dgraph-io/badger).
 
-To increase network throughput, a `--worker` flag allows to set the concurrency.
+To increase network throughput, a `--worker` flag allows to set the concurrency when monitoring.
 
 ## installation
 
