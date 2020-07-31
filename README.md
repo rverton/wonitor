@@ -3,27 +3,15 @@
 high performance web endpoint change monitoring. for comparing responses, a selected
 list of http headers and the full response body is stored on a local key/value store file.
 
-The following headers are included:
+wonitor makes use of a fast file based key/value store called [BadgerDb](https://github.com/dgraph-io/badger).
 
-```go
-var headerToInclude = []string{
-	"Host",
-	"Content-Length",
-	"Content-Type",
-	"Location",
-	"Access-Control-Allow-Origin",
-	"Access-Control-Allow-Methods",
-	"Access-Control-Expose-Headers",
-	"Access-Control-Allow-Credentials",
-	"Allow",
-	"Content-Security-Policy",
-	"Proxy-Authenticate",
-	"Server",
-	"WWW-Authenticate",
-	"X-Frame-Options",
-	"X-Powered-By",
-}
-```
+To increase network throughput, a `--worker` flag allows to set the concurrency.
+
+## installation
+
+Install via go or [binary release](https://github.com/rverton/wonitor/releases):
+
+    go get -u github.com/rverton/wonitor
 
 ## usage
 
@@ -63,4 +51,28 @@ X-Frame-Options: DENY
 
 $ ./wonitor monitor --save
 $ # no output because no change detected
+```
+
+## endpoint diffing
+
+The following headers are also included in the saved response and monitored for changes:
+
+```go
+var headerToInclude = []string{
+	"Host",
+	"Content-Length",
+	"Content-Type",
+	"Location",
+	"Access-Control-Allow-Origin",
+	"Access-Control-Allow-Methods",
+	"Access-Control-Expose-Headers",
+	"Access-Control-Allow-Credentials",
+	"Allow",
+	"Content-Security-Policy",
+	"Proxy-Authenticate",
+	"Server",
+	"WWW-Authenticate",
+	"X-Frame-Options",
+	"X-Powered-By",
+}
 ```
