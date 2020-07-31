@@ -7,6 +7,8 @@ wonitor makes use of a fast file based key/value store called [BadgerDb](https:/
 
 To increase network throughput, a `--worker` flag allows to set the concurrency when monitoring.
 
+endpoints returning a javascript content type will be beautified by default.
+
 ## installation
 
 Install via go or [binary release](https://github.com/rverton/wonitor/releases):

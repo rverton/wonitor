@@ -10,10 +10,12 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strings"
 	"sync"
 	"time"
 
 	badger "github.com/dgraph-io/badger"
+	"github.com/ditashi/jsbeautifier-go/jsbeautifier"
 	"github.com/pmezard/go-difflib/difflib"
 
 	"github.com/gosimple/slug"
@@ -137,8 +139,30 @@ func Abs(x int) int {
 	return x
 }
 
-func handleDiff(url, bodyOld, bodyNew, outDir string) {
+func beautifyJs(s string) string {
+	opts := jsbeautifier.DefaultOptions()
+	splitted := strings.SplitN(s, "\n\n", 2)
+
+	if len(splitted) != 2 {
+		return s
+	}
+
+	beautified, err := jsbeautifier.Beautify(&splitted[1], opts)
+	if err != nil {
+		return s
+	}
+
+	return fmt.Sprintf("%v\n\n%v", splitted[0], beautified)
+}
+
+func handleDiff(url, bodyOld, bodyNew, outDir string, beautify bool) {
 	diffLen := Abs(len(bodyOld) - len(bodyNew))
+
+	if beautify {
+		bodyOld = beautifyJs(bodyOld)
+		bodyNew = beautifyJs(bodyNew)
+	}
+
 	diff := difflib.UnifiedDiff{
 		A:        difflib.SplitLines(bodyOld),
 		B:        difflib.SplitLines(bodyNew),
@@ -185,7 +209,7 @@ func minifyResponse(resp *http.Response) ([]byte, error) {
 	return b.Bytes(), nil
 }
 
-func retrieveAndCompare(db *badger.DB, url, outDir string, save bool, bodyOld []byte, wg *sync.WaitGroup) {
+func retrieveAndCompare(db *badger.DB, url, outDir string, save bool, bodyOld []byte, beautify bool, wg *sync.WaitGroup) {
 	defer wg.Done()
 
 	resp, err := retrieve(url)
@@ -204,7 +228,13 @@ func retrieveAndCompare(db *badger.DB, url, outDir string, save bool, bodyOld []
 		return
 	}
 
-	handleDiff(url, string(bodyOld), string(bodyNew), outDir)
+	if beautify && strings.Contains(resp.Header.Get("Content-Type"), "javascript") {
+		beautify = true
+	} else {
+		beautify = false
+	}
+
+	handleDiff(url, string(bodyOld), string(bodyNew), outDir, beautify)
 
 	if save {
 		err := db.Update(func(tx *badger.Txn) error {
@@ -217,7 +247,7 @@ func retrieveAndCompare(db *badger.DB, url, outDir string, save bool, bodyOld []
 	}
 }
 
-func monitor(db *badger.DB, save bool, outDir string, worker int) error {
+func monitor(db *badger.DB, save bool, outDir string, beautify bool, worker int) error {
 	var wg sync.WaitGroup
 	var sem = make(chan int, worker)
 
@@ -241,7 +271,7 @@ func monitor(db *badger.DB, save bool, outDir string, worker int) error {
 
 			wg.Add(1)
 			go func(db *badger.DB, url, outDIr string, save bool, bodyOld []byte, wg *sync.WaitGroup) {
-				retrieveAndCompare(db, string(url), outDir, save, bodyOld, wg)
+				retrieveAndCompare(db, string(url), outDir, save, bodyOld, beautify, wg)
 				<-sem
 			}(db, string(url), outDir, save, bodyOld, &wg)
 		}
@@ -338,7 +368,7 @@ func main() {
 				Aliases: []string{"m"},
 				Usage:   "retrieve all urls and compare them",
 				Action: func(c *cli.Context) error {
-					return monitor(db, c.Bool("save"), c.String("outDir"), c.Int("worker"))
+					return monitor(db, c.Bool("save"), c.String("outDir"), c.Bool("jsbeautify"), c.Int("worker"))
 				},
 				Flags: []cli.Flag{
 					&cli.BoolFlag{
@@ -354,6 +384,11 @@ func main() {
 						Name:  "worker",
 						Usage: "numbers of worker to retrieve data",
 						Value: 20,
+					},
+					&cli.BoolFlag{
+						Name:  "jsbeautify",
+						Usage: "beautify javascript if found",
+						Value: true,
 					},
 				},
 			},
