@@ -46,7 +46,23 @@ var headerToInclude = []string{
 	"X-Powered-By",
 }
 
-func addUrl(db *badger.DB, url string, useStdin bool) error {
+type Bits uint8
+
+const MODE_HEADERS_ONLY Bits = 1 << iota
+
+func Set(b, flag Bits) Bits    { return b | flag }
+func Clear(b, flag Bits) Bits  { return b &^ flag }
+func Toggle(b, flag Bits) Bits { return b ^ flag }
+func Has(b, flag Bits) bool    { return b&flag != 0 }
+
+func addUrl(db *badger.DB, url string, useStdin bool, headersOnly bool) error {
+
+	var mode Bits = 0
+
+	if headersOnly {
+		mode = MODE_HEADERS_ONLY
+	}
+
 	return db.Update(func(tx *badger.Txn) error {
 
 		if useStdin {
@@ -54,7 +70,8 @@ func addUrl(db *badger.DB, url string, useStdin bool) error {
 			scanner := bufio.NewScanner(os.Stdin)
 			for scanner.Scan() {
 				url = scanner.Text()
-				err := tx.Set([]byte(url), []byte(""))
+				e := badger.NewEntry([]byte(url), []byte("")).WithMeta(byte(mode))
+				err := tx.SetEntry(e)
 				if err != nil {
 					return err
 				}
@@ -66,7 +83,8 @@ func addUrl(db *badger.DB, url string, useStdin bool) error {
 		}
 		fmt.Printf("+ %v\n", url)
 
-		return tx.Set([]byte(url), []byte(""))
+		e := badger.NewEntry([]byte(url), []byte("")).WithMeta(byte(mode))
+		return tx.SetEntry(e)
 	})
 }
 
@@ -86,8 +104,14 @@ func list(db *badger.DB) error {
 		for it.Rewind(); it.Valid(); it.Next() {
 			item := it.Item()
 			k := item.Key()
+
+			mode := ""
+			if Has(Bits(item.UserMeta()), MODE_HEADERS_ONLY) {
+				mode = ", ONLY_HEADERS"
+			}
+
 			err := item.Value(func(v []byte) error {
-				fmt.Printf("%v, %vB\n", string(k), len(v))
+				fmt.Printf("%v, %vB%v\n", string(k), len(v), mode)
 				return nil
 			})
 			if err != nil {
@@ -174,7 +198,7 @@ func handleDiff(url, bodyOld, bodyNew, outDir string, beautify bool) {
 
 	if outDir == "" {
 		fmt.Printf("[%v] %vb diff:\n", url, diffLen)
-		fmt.Println(text)
+		fmt.Printf("%v", text)
 	} else {
 		filename := fmt.Sprintf("%v/%v_%v.diff", outDir, time.Now().Format("20060201-150405"), slug.Make(url))
 		data := []byte(text)
@@ -187,7 +211,7 @@ func handleDiff(url, bodyOld, bodyNew, outDir string, beautify bool) {
 }
 
 // only leave a few interesting headers in the response
-func minifyResponse(resp *http.Response) ([]byte, error) {
+func minifyResponse(resp *http.Response, onlyHeaders bool) ([]byte, error) {
 	defer resp.Body.Close()
 
 	var b bytes.Buffer
@@ -195,21 +219,27 @@ func minifyResponse(resp *http.Response) ([]byte, error) {
 	b.WriteString(fmt.Sprintf("%v %v\n", resp.Proto, resp.Status))
 
 	for _, header := range headerToInclude {
+		if onlyHeaders && header == "Content-Length" {
+			continue
+		}
+
 		v := resp.Header.Get(header)
 		if v != "" {
 			b.WriteString(fmt.Sprintf("%v: %v\n", header, v))
 		}
 	}
 
-	limitedReader := &io.LimitedReader{R: resp.Body, N: RESPONSE_BODY_LIMIT}
+	if !onlyHeaders {
+		limitedReader := &io.LimitedReader{R: resp.Body, N: RESPONSE_BODY_LIMIT}
 
-	b.WriteString("\n")
-	io.Copy(&b, limitedReader)
+		b.WriteString("\n")
+		io.Copy(&b, limitedReader)
+	}
 
 	return b.Bytes(), nil
 }
 
-func retrieveAndCompare(db *badger.DB, url, outDir string, save bool, bodyOld []byte, beautify bool, wg *sync.WaitGroup) {
+func retrieveAndCompare(db *badger.DB, url, outDir string, save bool, bodyOld []byte, beautify bool, onlyHeaders bool, wg *sync.WaitGroup) {
 	defer wg.Done()
 
 	resp, err := retrieve(url)
@@ -218,7 +248,7 @@ func retrieveAndCompare(db *badger.DB, url, outDir string, save bool, bodyOld []
 		return
 	}
 
-	bodyNew, err := minifyResponse(resp)
+	bodyNew, err := minifyResponse(resp, onlyHeaders)
 	if err != nil {
 		log.Printf("err minifying resp: %v", err)
 		return
@@ -264,16 +294,18 @@ func monitor(db *badger.DB, save bool, outDir string, beautify bool, worker int)
 			item := it.Item()
 			url := string(item.Key())
 
+			onlyHeaders := Has(Bits(item.UserMeta()), MODE_HEADERS_ONLY)
+
 			bodyOld, err := item.ValueCopy(nil)
 			if err != nil {
 				return err
 			}
 
 			wg.Add(1)
-			go func(db *badger.DB, url, outDIr string, save bool, bodyOld []byte, wg *sync.WaitGroup) {
-				retrieveAndCompare(db, string(url), outDir, save, bodyOld, beautify, wg)
+			go func(db *badger.DB, url, outDIr string, save bool, bodyOld []byte, onlyHeaders bool, wg *sync.WaitGroup) {
+				retrieveAndCompare(db, string(url), outDir, save, bodyOld, beautify, onlyHeaders, wg)
 				<-sem
-			}(db, string(url), outDir, save, bodyOld, &wg)
+			}(db, string(url), outDir, save, bodyOld, onlyHeaders, &wg)
 		}
 
 		return nil
@@ -315,6 +347,11 @@ func main() {
 						Name:  "stdin",
 						Usage: "read urls from stdin, line by line",
 					},
+					&cli.BoolFlag{
+						Name:  "headersOnly",
+						Usage: "only retrieve headers and discard body",
+						Value: false,
+					},
 				},
 				Action: func(c *cli.Context) error {
 					if c.String("url") == "" && !c.Bool("stdin") {
@@ -322,7 +359,7 @@ func main() {
 						os.Exit(1)
 					}
 
-					return addUrl(db, c.String("url"), c.Bool("stdin"))
+					return addUrl(db, c.String("url"), c.Bool("stdin"), c.Bool("headersOnly"))
 				},
 			},
 			{
